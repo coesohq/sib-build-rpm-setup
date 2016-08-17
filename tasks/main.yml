@@ -1,0 +1,101 @@
+---
+- name: install rpm build tools
+  yum: name=rpmdevtools
+       state=latest
+  become: yes
+
+- name: gather build dependencies
+  shell: rpmspec -q --buildrequires {{ spec_file }}
+  args:
+    chdir: "{{ spec_file_dir }}"
+  register: build_deps_result
+
+- name: set fact - build_dependency_pkgs
+  set_fact:
+    build_dependency_pkgs: "{{ build_deps_result.stdout }}"
+
+- name: install yum-utils
+  yum: name=yum-utils
+       state=latest
+  become: yes
+
+- name: install build dependencies
+  shell: yum-builddep -y {{ spec_file }}
+  args:
+    chdir: "{{ spec_file_dir }}"
+  become: yes
+
+- name: record all installed packages
+  shell: yum list installed | sort
+  register: yum_list_installed_result
+
+- name : set fact - installed_packages
+  set_fact:
+    installed_packages: "{{ yum_list_installed_result.stdout }}"
+
+- name: get artifact name from spec file
+  shell: /usr/bin/env python2 artifact-name.py "{{ spec_file }}"
+  args:
+    chdir: "{{ spec_file_dir }}"
+  register: artifact_name_result
+
+- name: set fact - artifact_name
+  set_fact:
+    artifact_name: "{{ artifact_name_result.stdout }}"
+
+- name: set fact - source_tarball_name
+  set_fact:
+    source_tarball_name: "{{ artifact_name }}-{{ new_version }}"
+
+- name: set fact - source_tarball_dir
+  set_fact:
+    source_tarball_dir: "{{ sources_dir }}/{{ source_tarball_name }}"
+
+- name: create sources dir and its subdirs
+  file: state=directory
+        path="{{ source_tarball_dir }}"
+
+- name: copy git repo to source tarball dir
+  copy: src="{{ git_path }}/"
+        dest="{{ source_tarball_dir }}"
+
+- name: remove rpmbuild dir if it already exists
+  file: state=absent
+        path="{{ rpmbuild_dir }}"
+
+- name: create rpmbuild dir and its subdirs
+  file: state=directory
+        path="{{ rpmbuild_dir }}/{{ item }}"
+  with_items:
+    - "BUILD"
+    - "RPMS"
+    - "SOURCES"
+    - "SPECS"
+    - "SRPMS"
+
+# Use this with Ansible v2.2.0+ instead of the steps afterwards
+# - name: create tarball of git repo
+#   archive: path="{{ source_tarball_dir }}" dest="{{ rpmbuild_dir }}/SOURCES/{{ source_tarball_name }}.tar.gz" compression="gz"
+
+- name: create tarball of git repo
+  shell: tar cvzf {{ source_tarball_name }}.tar.gz {{ source_tarball_name }}
+  args:
+    chdir: "{{ sources_dir }}"
+
+- name: copy source tarball to sources dir
+  copy: src="{{ sources_dir }}/{{ source_tarball_name }}.tar.gz"
+        dest="{{ rpmbuild_dir }}/SOURCES/{{ source_tarball_name }}.tar.gz"
+
+- name: copy spec file to specs dir
+  copy: src="{{ spec_file_dir }}/{{ spec_file }}"
+        dest="{{ rpmbuild_dir }}/SPECS/{{ spec_file }}"
+
+- name: edit version in spec file
+  lineinfile: dest="{{ rpmbuild_dir }}/SPECS/{{ spec_file }}"
+              regexp="Version:"
+              line="Version{{':'}} {{ new_version }}"
+
+- name: edit release in spec file
+  lineinfile: dest="{{ rpmbuild_dir }}/SPECS/{{ spec_file }}"
+              regexp="Release:"
+              line="Release{{':'}} {{ release }}"

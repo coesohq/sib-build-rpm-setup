@@ -1,0 +1,5 @@
+---
+spec_file: "UNSET"
+spec_file_dir: "{{ git_path }}"
+rpmbuild_dir: "/tmp/{{ spec_file }}/rpmbuild"
+sources_dir: "/tmp/{{ spec_file }}/SOURCES"
